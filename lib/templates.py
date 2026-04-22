@@ -35,7 +35,8 @@ AI_QUERY_TEMPLATES = [
     ("長尾", "{業界} 料金相場"),
 ]
 
-AI_SERVICES = ["ChatGPT", "Claude", "Perplexity", "Gemini"]
+# v1.2: 自動URL入力対応の2AI (ChatGPT/Perplexity) のみで運用。Claude/Gemini は手動ペーストが必要なため除外
+AI_SERVICES = ["ChatGPT", "Perplexity"]
 
 # =====================================================================
 # 領域3: 構造化データ - 9項目
