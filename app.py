@@ -268,16 +268,33 @@ else:
 
         aiq = proj["diagnosis"]["ai_quote"]
 
+        # 業界・競合が未設定だとクエリが成立しないので検知して警告
+        industry = (proj.get("industry") or "").strip()
+        competitors_list = [c for c in proj.get("competitors", []) if c and c.strip()]
+        missing = []
+        if not industry:
+            missing.append("業界カテゴリ")
+        if len(competitors_list) < 2:
+            missing.append(f"競合社 (現在{len(competitors_list)}社、2社以上推奨)")
+        if missing:
+            st.warning(
+                "⚠️ クエリの主語が不明瞭になる可能性があります。「📝 案件情報」タブで以下を入力してください: "
+                + " / ".join(missing)
+            )
+
         # Helper to swap placeholders in query
         def fill_placeholders(q):
-            q = q.replace("{企業名}", proj.get("client_name", "{企業名}"))
-            q = q.replace("{業界}", proj.get("industry", "{業界}"))
-            q = q.replace("{業界カテゴリ}", proj.get("industry", "{業界}"))
-            q = q.replace("{ユーザー課題}", proj.get("industry", "") + " 保険選び")
-            comps = proj.get("competitors", [])
-            if len(comps) >= 1: q = q.replace("{競合A}", comps[0])
-            if len(comps) >= 2: q = q.replace("{競合B}", comps[1])
-            if len(comps) >= 3: q = q.replace("{競合C}", comps[2])
+            # 空文字列は置換せずプレースホルダを残す (ユーザーに入力漏れを気付かせる)
+            company = (proj.get("client_name") or "").strip() or "{企業名}"
+            ind = industry or "{業界}"
+            q = q.replace("{企業名}", company)
+            q = q.replace("{業界}", ind)
+            q = q.replace("{業界カテゴリ}", ind)
+            comps = competitors_list
+            labels = ["{競合A}", "{競合B}", "{競合C}"]
+            for idx, label in enumerate(labels):
+                if idx < len(comps):
+                    q = q.replace(label, comps[idx])
             return q
 
         # Position option labels with emoji + point weight
