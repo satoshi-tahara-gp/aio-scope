@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.streamlit/secrets.toml
+data/*.json
+data/*.db
+.venv/
+venv/
+.env
+*.log
+.claude/launch.json
