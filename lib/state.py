@@ -13,7 +13,7 @@ def _empty_ai_quote_rows():
     for i, (cat, tpl) in enumerate(AI_QUERY_TEMPLATES):
         row = {"category": cat, "template": tpl, "query": tpl}
         for ai in AI_SERVICES:
-            row[ai] = {"cite": 0, "position": 0, "accuracy": 0}
+            row[ai] = {"cite": 0, "position": 0, "accuracy": 0, "response": ""}
         rows.append(row)
     return rows
 

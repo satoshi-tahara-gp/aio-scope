@@ -19,8 +19,11 @@ from lib.state import (
 from lib.templates import (
     AREAS, AREA_ORDER, AI_SERVICES, AI_QUERY_TEMPLATES,
     SCHEMA_ITEMS, EEAT_ITEMS, TECH_SEO_ITEMS, rank_from_score,
+    ai_launch_url, google_search_url, rich_results_test_url,
+    pagespeed_url, schema_validator_url, wayback_url,
 )
 from lib.scoring import score_all
+from lib.auto_score import analyze_response
 from lib.excel_export import build_xlsx
 from lib.pptx_export import build_pptx
 
@@ -258,9 +261,8 @@ else:
     with tabs[1]:
         st.subheader(f"① AI引用露出度 (20点満点, 現在 {sc['ai_quote']}/20)")
         st.caption(
-            f"15クエリ × 4AI ({', '.join(AI_SERVICES)}) に対して、"
-            "引用 (0/1), 位置 (0-3: 0=なし/1=末尾/2=中盤/3=先頭), "
-            "正確性 (0-3) を入力"
+            "各クエリを4つのAIで実行し、応答テキストを貼り付けると自動でスコアを提案します。"
+            "① クエリをコピー → ② 「〜で開く」ボタンでAIを開く → ③ 応答をペースト → ④ 必要に応じてスコア微調整"
         )
 
         aiq = proj["diagnosis"]["ai_quote"]
@@ -269,44 +271,114 @@ else:
         def fill_placeholders(q):
             q = q.replace("{企業名}", proj.get("client_name", "{企業名}"))
             q = q.replace("{業界}", proj.get("industry", "{業界}"))
+            q = q.replace("{業界カテゴリ}", proj.get("industry", "{業界}"))
+            q = q.replace("{ユーザー課題}", proj.get("industry", "") + " 保険選び")
             comps = proj.get("competitors", [])
             if len(comps) >= 1: q = q.replace("{競合A}", comps[0])
             if len(comps) >= 2: q = q.replace("{競合B}", comps[1])
             if len(comps) >= 3: q = q.replace("{競合C}", comps[2])
             return q
 
+        brand_name = proj.get("client_name", "")
+
         for i, row in enumerate(aiq["rows"]):
-            with st.expander(f"Q{i+1}: [{row['category']}] {fill_placeholders(row['template'])}",
-                             expanded=False):
-                # Query override input
-                current_q = row.get("query", fill_placeholders(row["template"]))
-                if current_q == row["template"]:
-                    current_q = fill_placeholders(row["template"])
+            # Calculate filled query for auto-fill
+            filled = fill_placeholders(row["template"])
+            if not row.get("query") or row.get("query") == row["template"]:
+                row["query"] = filled
+
+            # Count completed AIs for summary in header
+            completed = sum(
+                1 for ai in AI_SERVICES
+                if row.get(ai, {}).get("cite", 0) or row.get(ai, {}).get("response")
+            )
+            header = f"Q{i+1} [{row['category']}] {filled}  —  {completed}/4 AI済"
+
+            with st.expander(header, expanded=False):
+                # --- Query editor ---
                 new_q = st.text_input(
-                    "実行したクエリ", value=current_q,
+                    "実行するクエリ (編集可能)", value=row["query"],
                     key=f"aiq_q_{i}",
                 )
                 row["query"] = new_q
 
+                # --- Copy helper ---
+                st.caption("↓ クエリをクリック → 右上のコピーアイコンでクリップボードに保存")
+                st.code(new_q, language=None)
+
+                # --- Launch buttons ---
+                l_cols = st.columns(4)
+                for j, ai in enumerate(AI_SERVICES):
+                    l_cols[j].link_button(
+                        f"🚀 {ai}で開く",
+                        ai_launch_url(ai, new_q),
+                        use_container_width=True,
+                    )
+
+                st.divider()
+
+                # --- Response + scoring per AI ---
                 for ai in AI_SERVICES:
-                    cols = st.columns([2, 2, 2, 2])
-                    cols[0].markdown(f"**{ai}**")
-                    scores = row.setdefault(ai, {"cite": 0, "position": 0, "accuracy": 0})
-                    scores["cite"] = cols[1].radio(
+                    scores = row.setdefault(
+                        ai, {"cite": 0, "position": 0, "accuracy": 0, "response": ""}
+                    )
+                    # Ensure all expected keys exist
+                    scores.setdefault("response", "")
+
+                    st.markdown(f"**🤖 {ai}**")
+                    response_text = st.text_area(
+                        f"{ai} の応答をペースト (空欄OK)",
+                        value=scores.get("response", ""),
+                        key=f"aiq_{i}_{ai}_resp",
+                        placeholder="AIの回答をここに貼り付けると自動で採点を提案します",
+                        height=100,
+                    )
+                    scores["response"] = response_text
+
+                    # Auto-analyze if response present
+                    suggest = None
+                    if response_text and brand_name:
+                        suggest = analyze_response(response_text, brand_name)
+                        badge_color = "#10B981" if suggest["cite"] else "#64748B"
+                        msg = (
+                            f"<span style='background:{badge_color};color:white;"
+                            f"padding:2px 8px;border-radius:4px;font-size:12px;'>"
+                            f"🤖 自動提案: 引用={suggest['cite']} / 位置={suggest['position']} "
+                            f"/ 正確性={suggest['accuracy']} (登場{suggest['count']}回)</span>"
+                        )
+                        st.markdown(msg, unsafe_allow_html=True)
+                        if suggest["snippet"]:
+                            st.caption(f"📍 該当箇所: {suggest['snippet']}")
+
+                        # Apply suggestion button
+                        if st.button(
+                            "⚡ この提案を採用",
+                            key=f"aiq_{i}_{ai}_apply",
+                            use_container_width=False,
+                        ):
+                            scores["cite"] = suggest["cite"]
+                            scores["position"] = suggest["position"]
+                            scores["accuracy"] = suggest["accuracy"]
+                            st.rerun()
+
+                    # Score inputs (editable)
+                    sc_cols = st.columns([1, 2, 2])
+                    scores["cite"] = sc_cols[0].radio(
                         "引用", [0, 1],
                         index=int(scores.get("cite", 0) or 0),
                         key=f"aiq_{i}_{ai}_cite", horizontal=True,
                     )
-                    scores["position"] = cols[2].slider(
-                        "位置 (0-3)", 0, 3,
+                    scores["position"] = sc_cols[1].slider(
+                        "位置 (0=なし/1=末尾/2=中盤/3=先頭)", 0, 3,
                         int(scores.get("position", 0) or 0),
                         key=f"aiq_{i}_{ai}_pos",
                     )
-                    scores["accuracy"] = cols[3].slider(
+                    scores["accuracy"] = sc_cols[2].slider(
                         "正確性 (0-3)", 0, 3,
                         int(scores.get("accuracy", 0) or 0),
                         key=f"aiq_{i}_{ai}_acc",
                     )
+                    st.markdown("")  # spacing
 
         aiq["notes"] = st.text_area(
             "全体メモ", value=aiq.get("notes", ""),
@@ -317,11 +389,24 @@ else:
     # ============ Tab 2: SGE ============
     with tabs[2]:
         st.subheader(f"② Google SGE / AI Overview (15点満点, 現在 {sc['sge']}/15)")
-        st.caption("20キーワード別にAI Overview表示 / 自社引用 / リンク露出をチェック")
+        st.caption(
+            "💡 各行の「🔎 Google検索」ボタンでシークレット検索が開きます。AI Overview表示と自社引用の有無をチェック。"
+        )
 
         sge = proj["diagnosis"]["sge"]
+        # Header row
+        hcols = st.columns([0.5, 3, 1.2, 1.2, 1.2, 1.2, 2, 1.5])
+        hcols[0].caption("#")
+        hcols[1].caption("キーワード")
+        hcols[2].caption("検索Vol")
+        hcols[3].caption("Overview表示")
+        hcols[4].caption("自社引用")
+        hcols[5].caption("リンク")
+        hcols[6].caption("メモ")
+        hcols[7].caption("検索")
+
         for i, row in enumerate(sge["rows"]):
-            cols = st.columns([1, 4, 2, 1.2, 1.2, 1.2, 3])
+            cols = st.columns([0.5, 3, 1.2, 1.2, 1.2, 1.2, 2, 1.5])
             cols[0].markdown(f"**{i+1}**")
             row["keyword"] = cols[1].text_input(
                 "キーワード", value=row.get("keyword", ""),
@@ -334,17 +419,25 @@ else:
             )
             row["overview"] = cols[3].checkbox(
                 "Overview", value=row.get("overview", False), key=f"sge_ov_{i}",
+                label_visibility="collapsed",
             )
             row["cite"] = cols[4].checkbox(
                 "自社引用", value=row.get("cite", False), key=f"sge_cite_{i}",
+                label_visibility="collapsed",
             )
             row["link"] = cols[5].checkbox(
                 "リンク", value=row.get("link", False), key=f"sge_link_{i}",
+                label_visibility="collapsed",
             )
             row["note"] = cols[6].text_input(
                 "メモ", value=row.get("note", ""), key=f"sge_note_{i}",
                 label_visibility="collapsed", placeholder="メモ",
             )
+            if row.get("keyword"):
+                cols[7].link_button(
+                    "🔎 検索", google_search_url(row["keyword"]),
+                    use_container_width=True,
+                )
 
         sge["notes"] = st.text_area(
             "全体メモ", value=sge.get("notes", ""), key="sge_notes",
@@ -354,7 +447,20 @@ else:
     # ============ Tab 3: Schema ============
     with tabs[3]:
         st.subheader(f"③ 構造化データ (20点満点, 現在 {sc['schema']}/20)")
-        st.caption("各項目を 0=なし / 1=部分的 / 2=完全 で評価。Google Rich Results Testで確認")
+        st.caption("各項目を 0=なし / 1=部分的 / 2=完全 で評価")
+
+        # External tool buttons
+        tl_cols = st.columns(2)
+        tl_cols[0].link_button(
+            "🔍 Google Rich Results Test で確認",
+            rich_results_test_url(proj.get("target_url", "")),
+            use_container_width=True,
+        )
+        tl_cols[1].link_button(
+            "🔍 Schema.org Validator で確認",
+            schema_validator_url(),
+            use_container_width=True,
+        )
 
         schema_data = proj["diagnosis"]["schema"]
         items_map = schema_data.setdefault("items", {})
@@ -389,6 +495,20 @@ else:
         st.subheader(f"④ E-E-A-T (15点満点, 現在 {sc['eeat']}/15)")
         st.caption("Experience / Expertise / Authoritativeness / Trust の観点で採点")
 
+        # External tool buttons
+        tl_cols = st.columns(2)
+        if proj.get("target_url"):
+            tl_cols[0].link_button(
+                "🕰 Wayback Machineで更新履歴を確認",
+                wayback_url(proj["target_url"]),
+                use_container_width=True,
+            )
+            tl_cols[1].link_button(
+                "🔗 対象サイトを開く",
+                proj["target_url"],
+                use_container_width=True,
+            )
+
         eeat_data = proj["diagnosis"]["eeat"]
         items_map = eeat_data.setdefault("items", {})
 
@@ -416,6 +536,13 @@ else:
     with tabs[5]:
         st.subheader(f"⑤ テクニカルSEO (15点満点, 現在 {sc['tech_seo']}/15)")
         st.caption("Core Web Vitals / crawlability / security を評価")
+
+        # External tool buttons
+        st.link_button(
+            "⚡ PageSpeed Insights で Core Web Vitals を測定",
+            pagespeed_url(proj.get("target_url", "")),
+            use_container_width=True,
+        )
 
         tech_data = proj["diagnosis"]["tech_seo"]
         items_map = tech_data.setdefault("items", {})
@@ -445,7 +572,7 @@ else:
         st.subheader(f"⑥ 競合ベンチマーク (15点満点, 現在 {sc['competitor']}/15)")
         st.caption(
             "競合各社について領域1-5を同じ基準で採点。"
-            "自社合計との差分が15点換算される (中央値7.5)"
+            "各競合は「[AI名]で検索」ボタンから簡易チェックできます"
         )
 
         comp_data = proj["diagnosis"]["competitor"]
@@ -458,32 +585,43 @@ else:
             comp_data["competitors"] = comps
 
         # 自社
-        st.markdown("**📍 自社スコア (領域1-5、5タブから自動転記)**")
+        st.markdown("**📍 自社スコア (領域1-5、他タブから自動転記)**")
         self_scores = [sc["ai_quote"], sc["sge"], sc["schema"], sc["eeat"], sc["tech_seo"]]
         self_cols = st.columns(6)
         self_cols[0].markdown(f"**{proj.get('client_name', '自社')}**")
         for i, s in enumerate(self_scores):
-            self_cols[i + 1].metric(
-                f"領域{i+1}", f"{s:.1f}",
-            )
+            self_cols[i + 1].metric(f"領域{i+1}", f"{s:.1f}")
 
         st.divider()
         st.markdown("**🥊 競合スコア (手動入力)**")
         area_maxes = [20, 15, 20, 15, 15]
+        industry = proj.get("industry", "")
         for ci, c in enumerate(comps):
-            st.markdown(f"##### {c['name']}")
-            cols = st.columns(6)
-            cols[0].markdown("")
-            c["scores"] = c.get("scores", [0, 0, 0, 0, 0])
-            for i in range(5):
-                val = float(c["scores"][i] or 0)
-                new_val = cols[i + 1].number_input(
-                    f"領域{i+1} (/{area_maxes[i]})",
-                    min_value=0.0, max_value=float(area_maxes[i]),
-                    value=val, step=0.5,
-                    key=f"comp_{ci}_{i}",
-                )
-                c["scores"][i] = new_val
+            with st.expander(f"🥊 {c['name']}", expanded=False):
+                # Quick-launch buttons for scoping this competitor
+                st.caption("この競合をAIに聞いて観察したい場合:")
+                probe = f"{c['name']} {industry} の特徴・強み・評判"
+                st.code(probe, language=None)
+                b_cols = st.columns(4)
+                for j, ai in enumerate(AI_SERVICES):
+                    b_cols[j].link_button(
+                        f"🚀 {ai}",
+                        ai_launch_url(ai, probe),
+                        use_container_width=True,
+                    )
+                st.divider()
+                # Scores
+                c["scores"] = c.get("scores", [0, 0, 0, 0, 0])
+                cols = st.columns(5)
+                for i in range(5):
+                    val = float(c["scores"][i] or 0)
+                    new_val = cols[i].number_input(
+                        f"領域{i+1} (/{area_maxes[i]})",
+                        min_value=0.0, max_value=float(area_maxes[i]),
+                        value=val, step=0.5,
+                        key=f"comp_{ci}_{i}",
+                    )
+                    c["scores"][i] = new_val
 
         comp_data["notes"] = st.text_area(
             "メモ", value=comp_data.get("notes", ""), key="comp_notes",

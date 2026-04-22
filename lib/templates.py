@@ -110,3 +110,57 @@ def rank_from_score(score: float):
         if score >= threshold:
             return rank, desc, color
     return "D", "リニューアル必須", "#EF4444"
+
+
+# =====================================================================
+# AI サービスへのクエリ起動URL (query param対応のもののみ直接渡す)
+# =====================================================================
+from urllib.parse import quote_plus
+
+
+def ai_launch_url(service: str, query: str) -> str:
+    """各AIサービスでクエリを実行するためのURL。
+    対応していないサービスはトップページに飛ばす (ユーザーは手動でペースト)。
+    """
+    q = quote_plus(query or "")
+    urls = {
+        "ChatGPT":    f"https://chatgpt.com/?q={q}",
+        "Claude":     "https://claude.ai/new",  # query paramをサポートしていない
+        "Perplexity": f"https://www.perplexity.ai/search?q={q}",
+        "Gemini":     "https://gemini.google.com/app",  # 直接パラメータは不安定
+    }
+    return urls.get(service, "https://www.google.com/search?q=" + q)
+
+
+def google_search_url(keyword: str) -> str:
+    """Google検索 (AI Overview確認用)"""
+    return f"https://www.google.com/search?q={quote_plus(keyword or '')}"
+
+
+# =====================================================================
+# 外部診断ツール URL
+# =====================================================================
+def rich_results_test_url(url: str = "") -> str:
+    """Google Rich Results Test"""
+    if url:
+        return f"https://search.google.com/test/rich-results?url={quote_plus(url)}"
+    return "https://search.google.com/test/rich-results"
+
+
+def pagespeed_url(url: str = "") -> str:
+    """PageSpeed Insights"""
+    if url:
+        return f"https://pagespeed.web.dev/analysis?url={quote_plus(url)}"
+    return "https://pagespeed.web.dev/"
+
+
+def schema_validator_url() -> str:
+    """Schema Markup Validator"""
+    return "https://validator.schema.org/"
+
+
+def wayback_url(url: str = "") -> str:
+    """Wayback Machine (更新履歴確認)"""
+    if url:
+        return f"https://web.archive.org/web/*/{url}"
+    return "https://web.archive.org/"
