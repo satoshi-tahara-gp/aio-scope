@@ -8,19 +8,19 @@ from .templates import AI_QUERY_TEMPLATES, AI_SERVICES, SCHEMA_ITEMS, EEAT_ITEMS
 # 各クエリ x 各AI で 引用(0-1) + 位置(0-3) + 正確性(0-3) = 最大7点
 # 15クエリ x 4AI x 7 = 420点 → 20点換算
 def score_ai_quote(data: dict) -> float:
+    """v1.3: 位置スコアのみで算出 (先頭=3/中=2/末=1/なし=0)。
+    引用/正確性は位置から自動的に決まるため不要。
+    """
     if not data:
         return 0.0
     rows = data.get("rows", [])
     total = 0
-    # max_total は実際の行数で算出 (旧プロジェクト15行・新プロジェクト8行いずれもサポート)
-    max_total = len(rows) * len(AI_SERVICES) * 7
+    max_total = len(rows) * len(AI_SERVICES) * 3
     for row in rows:
         for ai in AI_SERVICES:
             scores = row.get(ai, {})
-            cite = min(1, max(0, int(scores.get("cite", 0) or 0)))
             pos = min(3, max(0, int(scores.get("position", 0) or 0)))
-            acc = min(3, max(0, int(scores.get("accuracy", 0) or 0)))
-            total += cite + pos + acc
+            total += pos
     if max_total == 0:
         return 0.0
     return round(total / max_total * 20, 1)

@@ -261,8 +261,8 @@ else:
     with tabs[1]:
         st.subheader(f"① AI引用露出度 (20点満点, 現在 {sc['ai_quote']}/20)")
         st.caption(
-            "各クエリを4つのAIで実行し、応答テキストを貼り付けると自動でスコアを提案します。"
-            "① クエリをコピー → ② 「〜で開く」ボタンでAIを開く → ③ 応答をペースト → ④ 必要に応じてスコア微調整"
+            "各クエリの🚀ボタンでAIを開いて応答を確認 → 下のセレクトボックスで登場位置を選ぶだけ。"
+            "ペースト不要です。"
         )
 
         aiq = proj["diagnosis"]["ai_quote"]
@@ -279,111 +279,70 @@ else:
             if len(comps) >= 3: q = q.replace("{競合C}", comps[2])
             return q
 
-        brand_name = proj.get("client_name", "")
+        # Position option labels with emoji + point weight
+        POS_OPTIONS = [0, 3, 2, 1]  # なし / 先頭 / 中盤 / 末尾
+        POS_LABELS = {
+            0: "❌ 登場なし (0pt)",
+            3: "📍 先頭に登場 (3pt)",
+            2: "⚪ 中盤に登場 (2pt)",
+            1: "⚫ 末尾に登場 (1pt)",
+        }
 
         for i, row in enumerate(aiq["rows"]):
-            # Calculate filled query for auto-fill
             filled = fill_placeholders(row["template"])
-            if not row.get("query") or row.get("query") == row["template"]:
-                row["query"] = filled
+            row["query"] = filled  # Keep query in sync with template-based fill
 
-            # Count completed AIs for summary in header
-            completed = sum(
+            # Header with completion status
+            rated = sum(
                 1 for ai in AI_SERVICES
-                if row.get(ai, {}).get("cite", 0) or row.get(ai, {}).get("response")
+                if int(row.get(ai, {}).get("position", 0) or 0) > 0
+                or row.get(ai, {}).get("_rated")
             )
-            header = f"Q{i+1} [{row['category']}] {filled}  —  {completed}/{len(AI_SERVICES)} AI済"
+            total_ai = len(AI_SERVICES)
 
-            with st.expander(header, expanded=False):
-                # --- Query editor ---
-                new_q = st.text_input(
-                    "実行するクエリ (編集可能)", value=row["query"],
-                    key=f"aiq_q_{i}",
+            with st.container(border=True):
+                # Query as bold, category chip as pill
+                st.markdown(
+                    f"**Q{i+1}** "
+                    f"<span style='background:#EEF2FF;color:#4338CA;padding:2px 8px;"
+                    f"border-radius:10px;font-size:11px;margin-right:6px;'>"
+                    f"{row['category']}</span> "
+                    f"{filled}",
+                    unsafe_allow_html=True,
                 )
-                row["query"] = new_q
-
-                # --- Copy helper ---
-                st.caption("↓ クエリをクリック → 右上のコピーアイコンでクリップボードに保存")
-                st.code(new_q, language=None)
-
-                # --- Launch buttons ---
-                l_cols = st.columns(4)
-                for j, ai in enumerate(AI_SERVICES):
-                    l_cols[j].link_button(
-                        f"🚀 {ai}で開く",
-                        ai_launch_url(ai, new_q),
-                        use_container_width=True,
-                    )
-
-                st.divider()
-
-                # --- Response + scoring per AI ---
-                for ai in AI_SERVICES:
-                    scores = row.setdefault(
-                        ai, {"cite": 0, "position": 0, "accuracy": 0, "response": ""}
-                    )
-                    # Ensure all expected keys exist
-                    scores.setdefault("response", "")
-
-                    st.markdown(f"**🤖 {ai}**")
-                    response_text = st.text_area(
-                        f"{ai} の応答をペースト (空欄OK)",
-                        value=scores.get("response", ""),
-                        key=f"aiq_{i}_{ai}_resp",
-                        placeholder="AIの回答をここに貼り付けると自動で採点を提案します",
-                        height=100,
-                    )
-                    scores["response"] = response_text
-
-                    # Auto-analyze if response present
-                    suggest = None
-                    if response_text and brand_name:
-                        suggest = analyze_response(response_text, brand_name)
-                        badge_color = "#10B981" if suggest["cite"] else "#64748B"
-                        msg = (
-                            f"<span style='background:{badge_color};color:white;"
-                            f"padding:2px 8px;border-radius:4px;font-size:12px;'>"
-                            f"🤖 自動提案: 引用={suggest['cite']} / 位置={suggest['position']} "
-                            f"/ 正確性={suggest['accuracy']} (登場{suggest['count']}回)</span>"
+                ai_cols = st.columns(len(AI_SERVICES))
+                for idx, ai in enumerate(AI_SERVICES):
+                    scores = row.setdefault(ai, {"cite": 0, "position": 0, "accuracy": 0})
+                    with ai_cols[idx]:
+                        sub_cols = st.columns([1.2, 2])
+                        sub_cols[0].link_button(
+                            f"🚀 {ai}",
+                            ai_launch_url(ai, filled),
+                            use_container_width=True,
                         )
-                        st.markdown(msg, unsafe_allow_html=True)
-                        if suggest["snippet"]:
-                            st.caption(f"📍 該当箇所: {suggest['snippet']}")
-
-                        # Apply suggestion button (callback pattern to avoid widget state conflict)
-                        def _apply(idx=i, ai_name=ai, s=suggest):
-                            st.session_state[f"aiq_{idx}_{ai_name}_cite"] = s["cite"]
-                            st.session_state[f"aiq_{idx}_{ai_name}_pos"] = s["position"]
-                            st.session_state[f"aiq_{idx}_{ai_name}_acc"] = s["accuracy"]
-
-                        st.button(
-                            "⚡ この提案を採用",
-                            key=f"aiq_{i}_{ai}_apply",
-                            on_click=_apply,
+                        current_pos = int(scores.get("position", 0) or 0)
+                        try:
+                            default_idx = POS_OPTIONS.index(current_pos)
+                        except ValueError:
+                            default_idx = 0
+                        new_pos = sub_cols[1].selectbox(
+                            f"{ai} 登場位置",
+                            options=POS_OPTIONS,
+                            format_func=lambda x: POS_LABELS[x],
+                            index=default_idx,
+                            key=f"aiq_{i}_{ai}_pos",
+                            label_visibility="collapsed",
                         )
-
-                    # Score inputs (editable)
-                    sc_cols = st.columns([1, 2, 2])
-                    scores["cite"] = sc_cols[0].radio(
-                        "引用", [0, 1],
-                        index=int(scores.get("cite", 0) or 0),
-                        key=f"aiq_{i}_{ai}_cite", horizontal=True,
-                    )
-                    scores["position"] = sc_cols[1].slider(
-                        "位置 (0=なし/1=末尾/2=中盤/3=先頭)", 0, 3,
-                        int(scores.get("position", 0) or 0),
-                        key=f"aiq_{i}_{ai}_pos",
-                    )
-                    scores["accuracy"] = sc_cols[2].slider(
-                        "正確性 (0-3)", 0, 3,
-                        int(scores.get("accuracy", 0) or 0),
-                        key=f"aiq_{i}_{ai}_acc",
-                    )
-                    st.markdown("")  # spacing
+                        scores["position"] = new_pos
+                        # cite を position から派生 (互換性用)
+                        scores["cite"] = 1 if new_pos > 0 else 0
 
         aiq["notes"] = st.text_area(
-            "全体メモ", value=aiq.get("notes", ""),
-            placeholder="AI引用全体の傾向メモ", key="aiq_notes",
+            "📝 全体メモ (所見の下書きなどご自由に)",
+            value=aiq.get("notes", ""),
+            placeholder="AI引用全体の傾向メモ",
+            key="aiq_notes",
+            height=80,
         )
         save_current_project(proj)
 
