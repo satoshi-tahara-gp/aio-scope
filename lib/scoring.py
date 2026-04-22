@@ -10,9 +10,11 @@ from .templates import AI_QUERY_TEMPLATES, AI_SERVICES, SCHEMA_ITEMS, EEAT_ITEMS
 def score_ai_quote(data: dict) -> float:
     if not data:
         return 0.0
+    rows = data.get("rows", [])
     total = 0
-    max_total = len(AI_QUERY_TEMPLATES) * len(AI_SERVICES) * 7
-    for row in data.get("rows", []):
+    # max_total は実際の行数で算出 (旧プロジェクト15行・新プロジェクト8行いずれもサポート)
+    max_total = len(rows) * len(AI_SERVICES) * 7
+    for row in rows:
         for ai in AI_SERVICES:
             scores = row.get(ai, {})
             cite = min(1, max(0, int(scores.get("cite", 0) or 0)))
