@@ -4,9 +4,9 @@ import streamlit as st
 
 def _allowed_domains():
     try:
-        return list(st.secrets.get("allowed_email_domains", ["goodpatch.co.jp"]))
+        return list(st.secrets.get("allowed_email_domains", ["goodpatch.com"]))
     except Exception:
-        return ["goodpatch.co.jp"]
+        return ["goodpatch.com"]
 
 
 def _expected_password():
@@ -38,7 +38,7 @@ def login_view():
             st.markdown("### サインイン")
             email = st.text_input(
                 "メールアドレス",
-                placeholder="yourname@goodpatch.co.jp",
+                placeholder="yourname@goodpatch.com",
                 key="login_email",
             )
             password = st.text_input(
