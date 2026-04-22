@@ -292,7 +292,7 @@ else:
                 1 for ai in AI_SERVICES
                 if row.get(ai, {}).get("cite", 0) or row.get(ai, {}).get("response")
             )
-            header = f"Q{i+1} [{row['category']}] {filled}  —  {completed}/4 AI済"
+            header = f"Q{i+1} [{row['category']}] {filled}  —  {completed}/{len(AI_SERVICES)} AI済"
 
             with st.expander(header, expanded=False):
                 # --- Query editor ---
@@ -350,16 +350,17 @@ else:
                         if suggest["snippet"]:
                             st.caption(f"📍 該当箇所: {suggest['snippet']}")
 
-                        # Apply suggestion button
-                        if st.button(
+                        # Apply suggestion button (callback pattern to avoid widget state conflict)
+                        def _apply(idx=i, ai_name=ai, s=suggest):
+                            st.session_state[f"aiq_{idx}_{ai_name}_cite"] = s["cite"]
+                            st.session_state[f"aiq_{idx}_{ai_name}_pos"] = s["position"]
+                            st.session_state[f"aiq_{idx}_{ai_name}_acc"] = s["accuracy"]
+
+                        st.button(
                             "⚡ この提案を採用",
                             key=f"aiq_{i}_{ai}_apply",
-                            use_container_width=False,
-                        ):
-                            scores["cite"] = suggest["cite"]
-                            scores["position"] = suggest["position"]
-                            scores["accuracy"] = suggest["accuracy"]
-                            st.rerun()
+                            on_click=_apply,
+                        )
 
                     # Score inputs (editable)
                     sc_cols = st.columns([1, 2, 2])
